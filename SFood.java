@@ -13,9 +13,9 @@ public enum SFood {
 	ANGLERFISH("Anglerfish", 13441);
 	
 	private final String name;
-	private final int[]itemId;
+	private final int[] itemId;
 	
-	private SFood(final String name, final int... itemId) {
+	SFood(final String name, final int... itemId) {
 		this.name = name;
 		this.itemId = itemId;
 	}
