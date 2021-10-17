@@ -1,5 +1,6 @@
 package me.remie.xeros.combat;
 
+import me.remie.xeros.utils.ExperienceTracker;
 import simple.api.coords.WorldArea;
 import simple.api.coords.WorldPoint;
 import simple.api.filters.SimpleSkills;
@@ -17,12 +18,12 @@ import java.awt.*;
 import java.util.regex.Pattern;
 
 /**
- * Created by Seth on April 4/24/2021, 2021 at 4:23 PM
+ * Created by Seth on April 10/11/2021, 2021 at 9:50 PM
  *
  * @author Seth Davis <sethdavis321@gmail.com>
  * @Discord Reminisce#1707
  */
-@ScriptManifest(author = "Reminisce", name = "SAIO Combat", category = Category.COMBAT, version = "0.1",
+@ScriptManifest(author = "Reminisce", name = "SAIO Combat - Xeros", category = Category.COMBAT, version = "0.1",
         description = "Kills monsters", discord = "Reminisce#1707", servers = { "Xeros" })
 public class AutoFighter extends Script implements SimplePaintable {
 
@@ -34,7 +35,6 @@ public class AutoFighter extends Script implements SimplePaintable {
     public boolean quickPrayers;
     public boolean started;
 
-    private int startExp = 0;
     public long startTime;
     public String status;
     public static final WorldArea HOME_AREA = new WorldArea(
@@ -43,10 +43,14 @@ public class AutoFighter extends Script implements SimplePaintable {
 
     public AutoFighterUI gui;
 
+    public ExperienceTracker experienceTracker;
+
     @Override
     public boolean onExecute() {
+        experienceTracker = new ExperienceTracker(ctx);
+        experienceTracker.start(SimpleSkills.Skill.HITPOINTS, SimpleSkills.Skill.ATTACK, SimpleSkills.Skill.STRENGTH,
+                SimpleSkills.Skill.DEFENCE, SimpleSkills.Skill.RANGED, SimpleSkills.Skill.MAGIC);
         startTime = System.currentTimeMillis();
-        startExp = currentCombatXp();
         status = "Waiting to start...";
         ctx.log("Thanks for using %s!", getName());
         try {
@@ -76,12 +80,12 @@ public class AutoFighter extends Script implements SimplePaintable {
 
             if (lootNames.length > 0) {//looting has been setup
 
-                if (eatForSpace && foodId != null && !ctx.inventory.populate().filter(foodId).isEmpty() && ctx.inventory.getFreeSlots() <= 0) {
+                if (eatForSpace && foodId != null &&  ctx.inventory.getFreeSlots() <= 0 && !ctx.inventory.populate().filter(foodId).isEmpty()) {
                     eatFood();
                 }
 
                 if (ctx.inventory.getFreeSlots() > 0 && !ground().isEmpty()) {
-                    SimpleGroundItem item = ground().nearest().next();
+                    SimpleGroundItem item = ctx.groundItems.nearest().next();
                     if (item != null) {
                         status("Looting " + item.getName());
                         item.interact();
@@ -94,7 +98,7 @@ public class AutoFighter extends Script implements SimplePaintable {
                 ctx.onCondition(() -> HOME_AREA.containsPoint(ctx.players.getLocal().getLocation()), 150, 12);
             }
 
-            if (!ctx.players.getLocal().inCombat()) {
+            if (!ctx.players.getLocal().inCombat() || ctx.players.getLocal().getInteracting() == null) {
                 SimpleNpc fm = npcs().filter((n) -> n.getInteracting() != null && n.getInteracting().equals(ctx.players.getLocal()) && n.inCombat()).nearest().next();
                 SimpleNpc npc = fm != null ? fm : npcs().nearest().next();
                 if (npc == null) {
@@ -115,24 +119,9 @@ public class AutoFighter extends Script implements SimplePaintable {
 
     @Override
     public void onTerminate() {
-
-    }
-
-    @Override
-    public void onPaint(Graphics2D g) {
-        g.setColor(Color.BLACK);
-        g.fillRect(5, 2, 192, 72);
-        g.setColor(Color.decode("#ea411c"));
-        g.drawRect(5, 2, 192, 72);
-        g.drawLine(8, 24, 194, 24);
-
-        g.setColor(Color.decode("#e0ad01"));
-        g.drawString("RAIO Fighter                              v. " + "0.1", 12, 20);
-        g.drawString("Time: " + ctx.paint.formatTime(System.currentTimeMillis() - startTime), 14, 42);
-        g.drawString("Status: " + status, 14, 56);
-        int totalExp = currentCombatXp() - startExp;
-        int expPh = (int) ((totalExp * 3600000D) / (System.currentTimeMillis() - startTime));
-        g.drawString("XP: " + totalExp + " (" + expPh + ")", 14, 70);
+        if (gui != null) {
+            gui.onCloseGUI();
+        }
     }
 
     /**
@@ -165,19 +154,6 @@ public class AutoFighter extends Script implements SimplePaintable {
         return false;
     }
 
-    public void setupEating(int[] foodId, int eatAt) {
-        this.foodId = foodId;
-        this.eatHealth = eatAt;
-    }
-
-    public void setupLooting(int[] lootNames) {
-        this.lootNames = lootNames;
-    }
-
-    public void setupAttacking(int[] npcIds) {
-        this.npcIds = npcIds;
-    }
-
     public final SimpleEntityQuery<SimpleNpc> npcs() {
         return ctx.npcs.populate().filter(npcIds).filter(n -> {
             if (n == null) {
@@ -187,7 +163,7 @@ public class AutoFighter extends Script implements SimplePaintable {
             if (n.getLocation().distanceTo(ctx.players.getLocal().getLocation()) > 15) {
                 return false;
             }
-            if (n.getInteracting() != null && !n.getInteracting().equals(ctx.players.getLocal())) {
+            if (n.inCombat() && n.getInteracting() != null && !n.getInteracting().equals(ctx.players.getLocal())) {
                 return false;
             }
             if (n.isDead()) {
@@ -212,14 +188,37 @@ public class AutoFighter extends Script implements SimplePaintable {
         });
     }
 
-    public int currentCombatXp() {
-        return ctx.skills.getExperience(SimpleSkills.Skill.HITPOINTS) + ctx.skills.getExperience(SimpleSkills.Skill.ATTACK)
-                + ctx.skills.getExperience(SimpleSkills.Skill.STRENGTH) + ctx.skills.getExperience(SimpleSkills.Skill.DEFENCE)
-                + ctx.skills.getExperience(SimpleSkills.Skill.RANGED) + ctx.skills.getExperience(SimpleSkills.Skill.MAGIC);
+    @Override
+    public void onPaint(Graphics2D g) {
+        g.setColor(Color.BLACK);
+        g.fillRect(5, 2, 192, 72);
+        g.setColor(Color.decode("#ea411c"));
+        g.drawRect(5, 2, 192, 72);
+        g.drawLine(8, 24, 194, 24);
+
+        g.setColor(Color.decode("#e0ad01"));
+        g.drawString("RAIO Fighter                              v. " + "0.1", 12, 20);
+        g.drawString("Time: " + ctx.paint.formatTime(System.currentTimeMillis() - startTime), 14, 42);
+        g.drawString("Status: " + status, 14, 56);
+
+        g.drawString("XP: " + ctx.paint.formatValue(experienceTracker.totalGainedXP()) + " (" + ctx.paint.formatValue(experienceTracker.totalGainedXPPerHour()) + ")", 14, 70);
     }
 
     private void status(String status) { // Set's our script's status
         this.status = status;
+    }
+
+    public void setupEating(int[] foodId, int eatAt) {
+        this.foodId = foodId;
+        this.eatHealth = eatAt;
+    }
+
+    public void setupLooting(int[] lootNames) {
+        this.lootNames = lootNames;
+    }
+
+    public void setupAttacking(int[] npcIds) {
+        this.npcIds = npcIds;
     }
 
 }
